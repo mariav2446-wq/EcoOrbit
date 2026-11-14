@@ -3,7 +3,7 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import numpy as np
-import os
+import requests
 
 # 1. Page Configuration
 st.set_page_config(
@@ -111,7 +111,7 @@ t = {
         "about_text": "### Conoce a María Vázquez\n¡Hola! Soy **María Vázquez**, creadora y desarrolladora principal de **EcoOrbit** para el NASA Space Apps Challenge 2026.\n\n### 💡 Por qué construí EcoOrbit\nA medida que la inteligencia artificial y el entrenamiento de modelos a gran escala se expanden, los centros de datos terrestres están ejerciendo una presión sin precedentes sobre nuestras redes eléctricas y agotando millones de litros de agua dulce todos los días para su refrigeración. Quería diseñar una solución innovadora y científicamente sólida que planteara: *¿Qué pasaría si trasladamos el peso del cómputo de IA fuera de la Tierra y hacia las estrellas?*\n\nEcoOrbit fue creado para modelar un futuro híbrido sostenible, aprovechando energía solar continua y refrigeración radiativa en el espacio, mientras salvaguardamos nuestras órbitas contra el riesgo de desastres por basura espacial."
     },
     "Français": {
-        "title": "⚡ EcoOrbit: Moteur de CCalcul Réseau & Durabilité LEO",
+        "title": "⚡ EcoOrbit: Moteur de Calcul Réseau & Durabilité LEO",
         "subtitle": "Projet NASA Space Apps Challenge — Déport des centres de données terrestres vers l'orbite basse",
         "params": "🎛️ Paramètres de Simulation",
         "offload_label": "Charge de travail transférée dans l'espace (%)",
@@ -178,5 +178,163 @@ energy_source = st.sidebar.radio(
     curr["energy_opts"]
 )
 
-# Dynamic Factor Logic
-grid_multipliers = {curr["energy_opts"][0]: 0.95, curr["energy_opts"][1]: 0.4}
+# 3. Dynamic Factor Logic
+grid_multipliers = {
+    curr["energy_opts"][0]: 0.95,
+    curr["energy_opts"][1]: 0.65,
+    curr["energy_opts"][2]: 0.45
+}
+
+shell_risk_factors = {
+    curr["shells"][0]: 1.15,
+    curr["shells"][1]: 1.45,
+    curr["shells"][2]: 0.85
+}
+
+grid_factor = grid_multipliers[energy_source]
+shell_factor = shell_risk_factors[orbit_altitude]
+
+# Impact Calculations (Baseline: 100 MW Data Center Cluster)
+co2_saved = round(offload_pct * 425 * grid_factor)
+water_saved = round(offload_pct * 18500)
+kessler_score = round(min(10.0, (offload_pct * 0.065) * shell_factor), 2)
+
+# 4. Top KPI Metrics Row
+col1, col2, col3, col4 = st.columns(4)
+col1.metric(curr["metric_co2"], f"{co2_saved:,} {curr['metric_co2_unit']}", f"+{offload_pct}%")
+col2.metric(curr["metric_water"], f"{water_saved:,} {curr['metric_water_unit']}", f"+{round(offload_pct * 0.9)}%")
+col3.metric(curr["metric_risk"], f"{kessler_score} / 10", delta=f"{round(kessler_score - 2.5, 2)}", delta_color="inverse")
+col4.metric(curr["metric_shell"], orbit_altitude.split(" ")[0], orbit_altitude.split("(")[1].replace(")", ""))
+
+st.markdown("---")
+
+# 5. Main Tabs
+tab1, tab2, tab3, tab4, tab5 = st.tabs(curr["tabs"])
+
+# TAB 1: Impact Dashboard
+with tab1:
+    c1, c2 = st.columns(2)
+    
+    with c1:
+        st.subheader(curr["compute_dist"])
+        dist_df = pd.DataFrame({
+            "Location": [curr["ground_loc"], curr["space_loc"]],
+            "Percentage": [100 - offload_pct, offload_pct]
+        })
+        fig_pie = px.pie(
+            dist_df,
+            values="Percentage",
+            names="Location",
+            hole=0.5,
+            color_discrete_sequence=["#3A506B", "#00F5D4"]
+        )
+        fig_pie.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
+        st.plotly_chart(fig_pie, use_container_width=True)
+
+    with c2:
+        st.subheader(curr["resource_vs_risk"])
+        bar_df = pd.DataFrame({
+            "Metric": [curr["co2_bar"], curr["water_bar"], curr["risk_bar"]],
+            "Value": [co2_saved / 10, water_saved / 100, kessler_score * 350]
+        })
+        fig_bar = px.bar(
+            bar_df,
+            x="Metric",
+            y="Value",
+            color="Metric",
+            color_discrete_sequence=["#00F5D4", "#00BBF9", "#F15BB5"]
+        )
+        fig_bar.update_layout(showlegend=False, paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
+        st.plotly_chart(fig_bar, use_container_width=True)
+
+# TAB 2: Interactive 3D Node Map
+with tab2:
+    st.subheader(curr["map_title"])
+    hubs_df = pd.DataFrame({
+        "Hub": curr["map_ground_hubs"],
+        "Lat": [37.3861, 51.5074, 35.6762, -33.8688, 0.0, 47.6062],
+        "Lon": [-122.0839, -0.1278, 139.6503, 151.2093, -78.4678, -122.3321],
+        "Capacity_MW": [25, 20, 20, 15, 10, 10]
+    })
+
+    fig_globe = go.Figure()
+    fig_globe.add_trace(go.Scattergeo(
+        lon=hubs_df["Lon"],
+        lat=hubs_df["Lat"],
+        text=hubs_df["Hub"],
+        mode="markers+text",
+        textposition="top center",
+        name=curr["map_legend"],
+        marker=dict(size=12, color="#00F5D4", line=dict(width=1, color="white"))
+    ))
+
+    # Simulated LEO Satellite Constellation Ring
+    sat_lons = np.linspace(-180, 180, max(6, int(offload_pct / 2)))
+    sat_lats = 45 * np.sin(np.radians(sat_lons * 2))
+    fig_globe.add_trace(go.Scattergeo(
+        lon=sat_lons,
+        lat=sat_lats,
+        mode="markers",
+        name=curr["space_loc"],
+        marker=dict(size=6, color="#F15BB5", symbol="diamond")
+    ))
+
+    fig_globe.update_geos(
+        projection_type="orthographic",
+        showcoastlines=True,
+        coastlinecolor="#4A5568",
+        showland=True,
+        landcolor="#1A202C",
+        showocean=True,
+        oceancolor="#0B0F19",
+        bgcolor="rgba(0,0,0,0)"
+    )
+    fig_globe.update_layout(height=550, margin={"r":0,"t":20,"l":0,"b":0}, paper_bgcolor="rgba(0,0,0,0)")
+    st.plotly_chart(fig_globe, use_container_width=True)
+
+# TAB 3: Live Satellite Tracker (CelesTrak)
+with tab3:
+    st.subheader(curr["sat_title"])
+    st.caption(curr["sat_sub"])
+
+    @st.cache_data(ttl=3600)
+    def load_celestrak_data():
+        try:
+            url = "https://celestrak.org/NORAD/elements/gp.php?GROUP=active&FORMAT=json"
+            resp = requests.get(url, timeout=8)
+            if resp.status_code == 200:
+                data = resp.json()[:150]
+                df = pd.DataFrame(data)
+                # Calculate approximate altitude from Mean Motion
+                df["Altitude_km"] = ((398600.4418 / ((df["MEAN_MOTION"] * 2 * np.pi / 86400) ** 2)) ** (1/3) - 6371).round(1)
+                df["Period_min"] = (1440 / df["MEAN_MOTION"]).round(1)
+                return df[["OBJECT_NAME", "NORAD_CAT_ID", "INCLINATION", "Altitude_km", "Period_min"]]
+        except Exception:
+            pass
+        # Fallback telemetry dataset if CelesTrak is rate-limited
+        return pd.DataFrame({
+            "OBJECT_NAME": ["STARLINK-31042", "STARLINK-31088", "ISS (ZARYA)", "ONEWEB-0412", "TERRA", "AQUA", "LANDSAT 9", "SENTINEL-2B"],
+            "NORAD_CAT_ID": [58901, 58915, 25544, 51012, 25994, 27424, 49260, 42063],
+            "INCLINATION": [53.16, 53.16, 51.64, 87.90, 98.20, 98.21, 98.22, 98.56],
+            "Altitude_km": [548.2, 549.0, 418.5, 1198.4, 705.1, 703.8, 705.0, 786.2],
+            "Period_min": [95.6, 95.6, 92.9, 109.4, 98.9, 98.8, 98.9, 100.6]
+        })
+
+    sat_df = load_celestrak_data()
+
+    s1, s2, s3 = st.columns(3)
+    s1.metric(curr["sat_monitored"], f"{len(sat_df):,}")
+    s2.metric(curr["sat_avg_alt"], f"{sat_df['Altitude_km'].mean():.1f} km")
+    s3.metric(curr["sat_avg_period"], f"{sat_df['Period_min'].mean():.1f} min")
+
+    st.dataframe(sat_df, use_container_width=True, hide_index=True)
+
+# TAB 4: NASA Strategy & Methodology
+with tab4:
+    st.subheader(curr["nasa_title"])
+    st.markdown(curr["nasa_exec"])
+
+# TAB 5: About Creator
+with tab5:
+    st.subheader(curr["about_title"])
+    st.markdown(curr["about_text"])
