@@ -179,4 +179,4 @@ energy_source = st.sidebar.radio(
 )
 
 # Dynamic Factor Logic
-grid_multipliers = {curr["energy_opts"][0]: 0.95, curr["energy_opts"][1]: 0.4}
+rid_multipliers = {curr["energy_opts"][0]: 0.95, curr["energy_opts"][1]: 0.4
